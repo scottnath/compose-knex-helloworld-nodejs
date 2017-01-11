@@ -1,3 +1,4 @@
+'use strict';
 /**
  * Copyright 2016 IBM Corp. All Rights Reserved.
  *
@@ -18,6 +19,9 @@
 var express = require('express');
 var app = express();
 var bodyParser = require('body-parser');
+const knex = require('knex');
+
+var database = require('./database');
 
 app.use(bodyParser.urlencoded({
   extended: false
@@ -38,97 +42,142 @@ var pg = require('pg');
 var cfenv = require('cfenv');
 var appenv = cfenv.getAppEnv();
 
+console.log('appenv');
+console.log(JSON.stringify(appenv, null, 2));
 // Within the application environment (appenv) there's a services object
-var services = appenv.services;
+let services = appenv.services;
+console.log('services YES');
+console.log(Array.isArray(services));
+
+/**
+
+  knex: {
+    dialect: 'pg',
+    connection: {
+      host: 'localhost',
+      user: 'punchcard',
+      database: 'punchcard',
+    },
+    debug: false,
+    acquireConnectionTimeout: 2000,
+  },
+
+ */
+services['user-provided'] = {
+  dialect: 'pg',
+  connection: {
+    database: 'knex_bluemix_helloworld',
+    password: 'punchcard',
+    host: 'localhost',
+    username: 'punchcard'
+  },
+  debug: false,
+  table: 'words',
+};
+
+// WORKING NON-KNEX VERSION:
+// services['user-provided'] = {
+//   'credentials': {
+//     'database': 'holmes',
+//     'password': 'punchcard',
+//     'host': 'localhost',
+//     'username': 'punchcard'
+//   },
+// };
+console.log('services');
+console.log(JSON.stringify(services, null, 2));
 
 // The services object is a map named by service so we extract the one for PostgreSQL
-var pg_services = services["compose-for-postgresql"];
+let credentials;
+let config;
 
-// This check ensures there is a services for PostgreSQL databases
-// assert(!util.isUndefined(pg_services), "Must be bound to compose-for-postgresql services");
+if (services['compose-for-postgresql']) {
+  credentials = services['compose-for-postgresql'][0].credentials;
 
-// We now take the first bound PostgreSQL service and extract it's credentials object
-var credentials = pg_services[0].credentials;
+  // Within the credentials, an entry ca_certificate_base64 contains the SSL pinning key
+  // We convert that from a string into a Buffer entry in an array which we use when
+  // connecting.
+  var ca = new Buffer(credentials.ca_certificate_base64, 'base64');
+  var connectionString = credentials.uri;
 
-// Within the credentials, an entry ca_certificate_base64 contains the SSL pinning key
-// We convert that from a string into a Buffer entry in an array which we use when
-// connecting.
-var ca = new Buffer(credentials.ca_certificate_base64, 'base64');
-var connectionString = credentials.uri;
+  // We want to parse connectionString to get username, password, database name, server, port
+  // So we can use those to connect to the database
+  var parse = require('pg-connection-string').parse;
+  config = parse(connectionString);
 
-// We want to parse connectionString to get username, password, database name, server, port
-// So we can use those to connect to the database
-var parse = require('pg-connection-string').parse;
-config = parse(connectionString);
-
-// Add some ssl
-config.ssl = {
-  rejectUnauthorized: false,
-  ca: ca
+  // Add some ssl
+  config.ssl = {
+    rejectUnauthorized: false,
+    ca: ca
+  }
+}
+else {
+  config = services['user-provided'];
 }
 
-// set up a new client using our config details
-var client = new pg.Client(config);
+console.log('credentials');
+console.log(JSON.stringify(credentials, null, 2));
 
-client.connect(function(err) {
-  if (err) {
-   response.status(500).send(err);
-  } else {
-    client.query('CREATE TABLE words (word varchar(256) NOT NULL, definition varchar(256) NOT NULL)', function (err,result){
-      if (err) {
-        console.log(err)
-      }
-    });
-  }
-});
+console.log('config');
+console.log(JSON.stringify(config, null, 2));
+
+const db = knex(config);
+
+// set up a new client using our config details
+// var client = new pg.Client(config);
+
+// client.connect(function(err) {
+//   if (err) {
+//     console.error('error connecting to db');
+//     console.error(err);
+//     response.status(500).send(err);
+//   } else {
+//     client.query('CREATE TABLE words (word varchar(256) NOT NULL, definition varchar(256) NOT NULL)', function (err, result){
+//       if (err) {
+//         console.error('error creating words table');
+//         console.error(err);
+//       }
+//     });
+//   }
+// });
+
+database.createTable(db, config);
 
 // We can now set up our web server. First up we set it to serve static pages
 app.use(express.static(__dirname + '/public'));
 
-app.put("/words", function(request, response) {
-  // set up a new client using our config details
-  var client = new pg.Client(config);
-  client.connect(function(err) {
-    if (err) {
-     response.status(500).send(err);
-    } else {
-      var queryText = 'INSERT INTO words(word,definition) VALUES($1, $2)';
-
-      client.query(queryText, [request.body.word,request.body.definition], function (error,result){
-        if (error) {
-         response.status(500).send(error);
-        } else {
-         response.send(result);
-        }
-      });
-    }
+app.put('/words', function(request, response) {
+  return db(config.table).insert({word: request.body.word, definition: request.body.definition}).returning('*').then(result => {
+    console.log(`added: ${JSON.stringify(result, null, 2)}`);
+    return response.send(result);
+  }).catch(error => {
+    console.error(`error: ${error}`);
+    return response.status(500).send(error);
   });
 });
 
-// Read from the database when someone visits /words
-app.get("/words", function(request, response) {
-  // set up a new client using our config details
-  var client = new pg.Client(config);
-  // connect to the database
-  client.connect(function(err) {
 
-    if (err) throw err;
-
-    // execute a query on our database
-    client.query('SELECT * FROM words ORDER BY word ASC', function (err, result) {
-      if (err) {
-       response.status(500).send(err);
-      } else {
-       response.send(result.rows);
-      }
-
-    });
-
+/**
+ * Read from the database when someone visits /words
+ * @param {object} request - HTTP Request
+ * @param {object} response - HTTP Response
+ * @param {object} next - Express callback
+ *
+ */
+app.get('/words', function(request, response, next) {
+  return db.select('*').from(config.table).then(rows => {
+    console.log(JSON.stringify(rows, null, 2));
+    return response.send(rows);
+  })
+  .catch(error => {
+    console.error(error);
+    return response.status(500).send(error);
   });
-
 });
 
 // Now we go and listen for a connection.
 app.listen(port);
 
-require("cf-deployment-tracker-client").track();
+console.log(`app started on port ${port}`);
+
+require('cf-deployment-tracker-client').track();
