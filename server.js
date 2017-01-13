@@ -75,15 +75,22 @@ services['user-provided'] = {
   table: 'words',
 };
 
-// WORKING NON-KNEX VERSION:
-// services['user-provided'] = {
-//   'credentials': {
-//     'database': 'holmes',
-//     'password': 'punchcard',
-//     'host': 'localhost',
-//     'username': 'punchcard'
-//   },
-// };
+
+services['production'] = {
+  dialect: 'pg',
+  connection: {
+    database: 'compose',
+    password: 'IDGSRVWBBPZOMGWA',
+    host: 'bluemix-sandbox-dal-9-portal.3.dblayer.com',
+    username: 'admin',
+    crazy: 'madeup',
+    user: 'admin',
+    port: 21889,
+  },
+  debug: false,
+  table: 'words',
+};
+
 console.log('services');
 console.log(JSON.stringify(services, null, 2));
 
@@ -103,7 +110,12 @@ if (services['compose-for-postgresql']) {
   // We want to parse connectionString to get username, password, database name, server, port
   // So we can use those to connect to the database
   var parse = require('pg-connection-string').parse;
-  config = parse(connectionString);
+  // config = parse(connectionString);
+  config = services['production'];
+console.log('-------------------');
+console.log('PARSIN THAT CONNECT STRING!');
+console.log(JSON.stringify(parse(connectionString), null, 2));
+console.log('-------------------');
 
   // Add some ssl
   config.ssl = {
@@ -115,31 +127,15 @@ else {
   config = services['user-provided'];
 }
 
-console.log('credentials');
+console.log('-------------------');
+console.log('CREDENTIALS');
 console.log(JSON.stringify(credentials, null, 2));
+console.log('-------------------');
 
 console.log('config');
-console.log(JSON.stringify(config, null, 2));
+console.log(JSON.stringify(config.connection, null, 2));
 
 const db = knex(config);
-
-// set up a new client using our config details
-// var client = new pg.Client(config);
-
-// client.connect(function(err) {
-//   if (err) {
-//     console.error('error connecting to db');
-//     console.error(err);
-//     response.status(500).send(err);
-//   } else {
-//     client.query('CREATE TABLE words (word varchar(256) NOT NULL, definition varchar(256) NOT NULL)', function (err, result){
-//       if (err) {
-//         console.error('error creating words table');
-//         console.error(err);
-//       }
-//     });
-//   }
-// });
 
 database.createTable(db, config);
 
@@ -166,10 +162,12 @@ app.put('/words', function(request, response) {
  */
 app.get('/words', function(request, response, next) {
   return db.select('*').from(config.table).then(rows => {
+    console.log('/words table rows');
     console.log(JSON.stringify(rows, null, 2));
     return response.send(rows);
   })
   .catch(error => {
+    console.error('error on /words load');
     console.error(error);
     return response.status(500).send(error);
   });
