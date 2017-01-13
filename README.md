@@ -1,6 +1,6 @@
-# compose-postgresql-helloworld-nodejs overview
+# compose-knex-helloworld-nodejs overview
 
-compose-postgresql-helloworld-nodejs is a sample Bluemix application which shows you how to connect to an IBM Compose for PostgreSQL for Bluemix service using Node.js.
+compose-knex-helloworld-nodejs is a sample Bluemix application which shows you how to connect to an IBM Compose for Bluemix service using Node.js and [knex](knex_home).
 
 ## Running the app on Bluemix
 
@@ -11,7 +11,7 @@ compose-postgresql-helloworld-nodejs is a sample Bluemix application which shows
 3. Clone the app to your local environment from your terminal using the following command:
 
   ```
-  git clone https://github.com/IBM-Bluemix/compose-postgresql-helloworld-nodejs.git
+  git clone https://github.com/IBM-Bluemix/compose-knex-helloworld-nodejs.git
   ```
 
 4. `cd` into this newly created directory
@@ -32,13 +32,13 @@ compose-postgresql-helloworld-nodejs is a sample Bluemix application which shows
   **Note :** The Compose for PostgreSQL service does not offer a free plan. For details of pricing, see the _Pricing Plans_ section of the [Compose for PostgreSQL service][compose_for_postgresql_url] in Bluemix.
 
   ```
-  $ cf create-service compose-for-postgresql Standard my-compose-for-postgresql-service
+  $ cf create-service compose-for-postgresql Standard my-compose-for-knex-service
   ```
 
 8. Bind the service to the application.
 
   ```
-  $ cf bind-service compose-postgresql-helloworld-nodejs my-compose-for-postgresql-service
+  $ cf bind-service compose-knex-helloworld-nodejs my-compose-for-knex-service
   ```
   
 9. Push the app to Bluemix.
@@ -80,6 +80,7 @@ This data is collected from the VCAP_APPLICATION environment variable in IBM Blu
 
 Deployment tracking can be disabled by removing `require("cf-deployment-tracker-client").track();` from the beginning of the `server.js` file.
 
+[knex_home](http://knexjs.org/)
 [compose_for_postgreSQL_url]: https://new-console.ng.bluemix.net/catalog/services/compose-for-postgreSQL/
 [bluemix_signup_url]: https://ibm.biz/compose-for-postgreSQL-signup
 [cloud_foundry_url]: https://github.com/cloudfoundry/cli

@@ -15,107 +15,68 @@
  * limitations under the License.
  */
 
- // First add the obligatory web framework
-var express = require('express');
-var app = express();
-var bodyParser = require('body-parser');
+// First add the obligatory web framework
+const express = require('express');
+const app = express();
+const bodyParser = require('body-parser');
 const knex = require('knex');
+const cfenv = require('cfenv');
+const parse = require('pg-connection-string').parse;
 
-var database = require('./database');
+// required for postgres
+const pg = require('pg');
+
+// local modules
+const database = require('./database');
 
 app.use(bodyParser.urlencoded({
   extended: false
 }));
 
-// Util is handy to have around, so thats why that's here.
-const util = require('util')
-// and so is assert
-const assert = require('assert');
-
 // We want to extract the port to publish our app on
-var port = process.env.PORT || 8080;
+const port = process.env.PORT || 8080;
 
-// Then we'll pull in the database client library
-var pg = require('pg');
+// Parse the environment variable
+const appenv = cfenv.getAppEnv();
 
-// Now lets get cfenv and ask it to parse the environment variable
-var cfenv = require('cfenv');
-var appenv = cfenv.getAppEnv();
-
-console.log('appenv');
-console.log(JSON.stringify(appenv, null, 2));
-// Within the application environment (appenv) there's a services object
+// From within the application environment (appenv,) extract the services object
 let services = appenv.services;
-console.log('services YES');
-console.log(Array.isArray(services));
+
+// Generic postgres config
+let config = {
+  dialect: 'pg',
+  connection: {},
+  debug: false,
+  table: 'words',
+};
 
 /**
-
-  knex: {
-    dialect: 'pg',
-    connection: {
-      host: 'localhost',
-      user: 'punchcard',
-      database: 'punchcard',
-    },
-    debug: false,
-    acquireConnectionTimeout: 2000,
-  },
-
+ * Local environment object
  */
 services['user-provided'] = {
-  dialect: 'pg',
-  connection: {
-    database: 'knex_bluemix_helloworld',
-    password: 'punchcard',
-    host: 'localhost',
-    username: 'punchcard'
-  },
-  debug: false,
-  table: 'words',
+  database: 'knex_bluemix_helloworld',
+  host: 'localhost',
+  username: 'punchcard',
+  password: 'punchcard',
 };
-
-
-services['production'] = {
-  dialect: 'pg',
-  connection: {
-    database: 'compose',
-    password: 'IDGSRVWBBPZOMGWA',
-    host: 'bluemix-sandbox-dal-9-portal.3.dblayer.com',
-    username: 'admin',
-    crazy: 'madeup',
-    user: 'admin',
-    port: 21889,
-  },
-  debug: false,
-  table: 'words',
-};
-
-console.log('services');
-console.log(JSON.stringify(services, null, 2));
 
 // The services object is a map named by service so we extract the one for PostgreSQL
 let credentials;
-let config;
 
+// The services object is a map named by service, so we extract the one for PostgreSQL
 if (services['compose-for-postgresql']) {
+  // We now take the first bound PostgreSQL service and extract it's credentials object
   credentials = services['compose-for-postgresql'][0].credentials;
 
   // Within the credentials, an entry ca_certificate_base64 contains the SSL pinning key
   // We convert that from a string into a Buffer entry in an array which we use when
   // connecting.
-  var ca = new Buffer(credentials.ca_certificate_base64, 'base64');
-  var connectionString = credentials.uri;
+  const ca = new Buffer(credentials.ca_certificate_base64, 'base64');
+  const connectionString = credentials.uri;
 
-  // We want to parse connectionString to get username, password, database name, server, port
-  // So we can use those to connect to the database
-  var parse = require('pg-connection-string').parse;
-  // config = parse(connectionString);
-  config = services['production'];
-console.log('-------------------');
-console.log('PARSIN THAT CONNECT STRING!');
-console.log(JSON.stringify(parse(connectionString), null, 2));
-console.log('-------------------');
+  // use the parsed connectionString to get username, password, database name, server, port
+  // So we can use those as the `connection` object in knex
+  config.connection = parse(connectionString);
 
   // Add some ssl
   config.ssl = {
@@ -124,37 +85,41 @@ console.log('-------------------');
   }
 }
 else {
-  config = services['user-provided'];
+  // no service object, so use the user-provided connection object
+  config.connection = services['user-provided'];
 }
 
-console.log('-------------------');
-console.log('CREDENTIALS');
-console.log(JSON.stringify(credentials, null, 2));
-console.log('-------------------');
-
-console.log('config');
-console.log(JSON.stringify(config.connection, null, 2));
-
+// set up knex using the config
 const db = knex(config);
 
+// create the table in the database
 database.createTable(db, config);
 
 // We can now set up our web server. First up we set it to serve static pages
 app.use(express.static(__dirname + '/public'));
 
+/**
+ * Save word/definition to database
+ * 
+ * @param {object} req - HTTP Request
+ * @param {object} res - HTTP Response
+ * 
+ * @return {object} returns a knex promise
+ */
 app.put('/words', function(request, response) {
   return db(config.table).insert({word: request.body.word, definition: request.body.definition}).returning('*').then(result => {
-    console.log(`added: ${JSON.stringify(result, null, 2)}`);
-    return response.send(result);
+    // save to db worked, send the last added entry
+    response.send(result);
   }).catch(error => {
-    console.error(`error: ${error}`);
-    return response.status(500).send(error);
+    // something went wrong on save, send the status and error
+    response.status(500).send(error);
   });
 });
 
 
 /**
- * Read from the database when someone visits /words
+ * Get all rows in the words table
+ * 
  * @param {object} request - HTTP Request
  * @param {object} response - HTTP Response
  * @param {object} next - Express callback
@@ -162,13 +127,11 @@ app.put('/words', function(request, response) {
  */
 app.get('/words', function(request, response, next) {
   return db.select('*').from(config.table).then(rows => {
-    console.log('/words table rows');
-    console.log(JSON.stringify(rows, null, 2));
+    // sends all rows
     return response.send(rows);
   })
   .catch(error => {
-    console.error('error on /words load');
-    console.error(error);
+    // something went wrong on select, send the status and error
     return response.status(500).send(error);
   });
 });
